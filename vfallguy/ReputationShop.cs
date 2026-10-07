@@ -30,10 +30,44 @@ public static class ReputationShop
         return Math.Max(im->GetInventoryItemCount(CurrencyItemId), (int)im->GetItemCountInContainer(CurrencyItemId, InventoryType.Currency));
     }
 
+    // 与 GBR 购买清单的计数方式一致：背包 + 兵装库 + 身上装备
+    private static readonly InventoryType[] OwnedContainers =
+    [
+        InventoryType.Inventory1, InventoryType.Inventory2, InventoryType.Inventory3, InventoryType.Inventory4,
+        InventoryType.ArmoryMainHand, InventoryType.ArmoryOffHand, InventoryType.ArmoryHead, InventoryType.ArmoryBody,
+        InventoryType.ArmoryHands, InventoryType.ArmoryWaist, InventoryType.ArmoryLegs, InventoryType.ArmoryFeets,
+        InventoryType.ArmoryEar, InventoryType.ArmoryNeck, InventoryType.ArmoryWrist, InventoryType.ArmoryRings,
+        InventoryType.EquippedItems,
+    ];
+
     public static unsafe int GetOwnedCount(uint itemId)
     {
         var im = InventoryManager.Instance();
-        return im != null ? im->GetInventoryItemCount(itemId) : 0;
+        if (im == null)
+            return 0;
+        var total = 0;
+        foreach (var type in OwnedContainers)
+            total += (int)im->GetItemCountInContainer(itemId, type);
+        return total;
+    }
+
+    // 还需要购买的物品：已勾选、未学习、持有数未达目标、且当前声誉买得起至少一个
+    public static (uint ItemId, uint TargetQuantity)[] GetPendingRequests(Configuration config)
+    {
+        var currency = GetCurrency();
+        var items = Items.ToDictionary(i => i.ItemId);
+        return [.. config.AutoShopItems
+            .Where(kv => kv.Value > 0 && items.TryGetValue(kv.Key, out var item)
+                && item.Cost <= currency && !IsLearned(item) && GetOwnedCount(kv.Key) < kv.Value)
+            .Select(kv => (kv.Key, kv.Value))];
+    }
+
+    // 声誉已满，或剩余空间不足最近记录中单次最大获得量（下一次就会溢出）
+    public static bool IsFull(Configuration config)
+    {
+        var space = Cap - GetCurrency();
+        var nextGain = config.Records.Count > 0 ? config.Records.TakeLast(20).Max(r => r.Amount) : 1;
+        return space < nextGain;
     }
 
     // 可学习物品（坐骑、宠物、乐谱、肖像等）已学习时返回 true

@@ -24,6 +24,8 @@ public class Configuration : IPluginConfiguration
     public int AutoShopThreshold { get; set; } = 9000;
     // 物品 ID -> 目标持有数量（与 GBR 购买清单的目标数量含义一致）
     public Dictionary<uint, uint> AutoShopItems { get; set; } = [];
+    // 金碟声誉刷满（下一次获得会溢出）时关闭自动报名
+    public bool StopWhenFull { get; set; } = true;
 
     // 金碟声誉统计（自上次重置起）
     public DateTime StatsSince { get; set; } = DateTime.Now;

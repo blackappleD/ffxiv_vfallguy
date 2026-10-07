@@ -6,7 +6,7 @@ using System.Numerics;
 namespace vfallguy;
 
 // 金碟声誉自动购物：达到阈值 -> 推送购买清单给 GBR -> GBR 购买 -> 走回节目登记员 -> 继续自动报名。
-// 任何一步失败、或买完后声誉仍不低于阈值，都会通过 Failed 事件通知关闭自动报名，避免声誉溢出。
+// 达到阈值但没有需要购买的物品时跳过，继续自动报名；购物流程出错时通过 Failed 事件通知关闭自动报名。
 public class AutoShopStateMachine : IDisposable
 {
     private enum State
@@ -26,6 +26,10 @@ public class AutoShopStateMachine : IDisposable
     private State _state = State.Idle;
     private DateTime _stateStart;
     private DateTime _nextAttempt;
+    private int _currencyAtStart;
+    // 声誉保持为该值期间不再触发购物（上次购物一件没买成，或 GBR 认为没有待购物品），避免反复触发
+    private int? _suppressedAtCurrency;
+    private bool _skipNotified;
 
     public event Action<string>? Failed;
 
@@ -52,8 +56,7 @@ public class AutoShopStateMachine : IDisposable
         switch (_state)
         {
             case State.Idle:
-                if (canStart && _config.AutoShopEnabled && ReputationShop.GetCurrency() >= _config.AutoShopThreshold)
-                    Begin(now);
+                UpdateIdle(now, canStart);
                 break;
 
             case State.PushList:
@@ -80,12 +83,16 @@ public class AutoShopStateMachine : IDisposable
                     break;
                 }
                 var remaining = ReputationShop.GetCurrency();
-                if (remaining >= _config.AutoShopThreshold)
+                if (remaining >= _currencyAtStart)
                 {
-                    Fail($"购买后金碟声誉仍有 {remaining}（阈值 {_config.AutoShopThreshold}），请在购物清单中添加更多物品或提高目标数量");
-                    break;
+                    // 一件没买成：声誉变化之前不再触发，避免买不到时反复往返
+                    _suppressedAtCurrency = remaining;
+                    Service.ChatGui.Print($"[vfallguy] 本次没有买到物品，正在走回节目登记员继续自动报名");
                 }
-                Service.ChatGui.Print($"[vfallguy] 购买完成，剩余金碟声誉 {remaining}，正在走回节目登记员");
+                else
+                {
+                    Service.ChatGui.Print($"[vfallguy] 购买完成，剩余金碟声誉 {remaining}，正在走回节目登记员");
+                }
                 Enter(State.ReturnToNpc, now);
                 break;
 
@@ -149,9 +156,37 @@ public class AutoShopStateMachine : IDisposable
         _state = State.Idle;
     }
 
-    private void Begin(DateTime now)
+    private void UpdateIdle(DateTime now, bool canStart)
     {
         var currency = ReputationShop.GetCurrency();
+        if (_suppressedAtCurrency is { } suppressed && suppressed != currency)
+            _suppressedAtCurrency = null;
+        if (currency < _config.AutoShopThreshold)
+            _skipNotified = false;
+
+        if (!canStart || !_config.AutoShopEnabled || currency < _config.AutoShopThreshold || _suppressedAtCurrency != null)
+            return;
+
+        if (ReputationShop.GetPendingRequests(_config).Length == 0)
+        {
+            Skip(currency);
+            return;
+        }
+        Begin(now, currency);
+    }
+
+    // 达到阈值但没有需要购买的物品：不购物，继续自动报名
+    private void Skip(int currency)
+    {
+        if (!_skipNotified)
+        {
+            Service.ChatGui.Print($"[vfallguy] 金碟声誉 {currency} 已达到阈值，但没有需要购买的物品，继续自动报名");
+            _skipNotified = true;
+        }
+    }
+
+    private void Begin(DateTime now, int currency)
+    {
         Service.Log.Info($"AutoShop: triggered at {currency}/{_config.AutoShopThreshold}");
         if (!_ipc.GbrReady)
         {
@@ -166,6 +201,7 @@ public class AutoShopStateMachine : IDisposable
             return;
         }
         Service.ChatGui.Print($"[vfallguy] 金碟声誉达到 {currency}，开始自动购物");
+        _currencyAtStart = currency;
         Enter(State.PushList, now);
         _nextAttempt = now;
     }
@@ -178,10 +214,10 @@ public class AutoShopStateMachine : IDisposable
             return;
         }
 
-        var requests = BuildRequests();
+        var requests = ReputationShop.GetPendingRequests(_config);
         if (requests.Length == 0)
         {
-            Fail("购物清单中没有可购买的物品（未勾选或都已学习）");
+            SkipAndResume(_currencyAtStart);
             return;
         }
 
@@ -227,7 +263,8 @@ public class AutoShopStateMachine : IDisposable
                 _nextAttempt = now.AddSeconds(RetryInterval);
                 break;
             case GatherBuddyIPC.StartNoPendingEntries:
-                Fail("清单中的物品都已达到目标持有数量");
+                // GBR 认为都已达到目标数量（计数口径可能与 vfallguy 略有不同），跳过并继续报名
+                SkipAndResume(ReputationShop.GetCurrency());
                 break;
             default:
                 Fail($"启动 GBR 购买失败（{started}）: {_ipc.ListStatus()}");
@@ -235,13 +272,12 @@ public class AutoShopStateMachine : IDisposable
         }
     }
 
-    // 已学习的可学习物品不再购买
-    private (uint, uint)[] BuildRequests()
+    // 还没开始移动就发现无需购买：回到闲置并在声誉变化前不再触发
+    private void SkipAndResume(int currency)
     {
-        var items = ReputationShop.Items.ToDictionary(i => i.ItemId);
-        return [.. _config.AutoShopItems
-            .Where(kv => kv.Value > 0 && items.TryGetValue(kv.Key, out var item) && !ReputationShop.IsLearned(item))
-            .Select(kv => (kv.Key, kv.Value))];
+        _state = State.Idle;
+        _suppressedAtCurrency = currency;
+        Skip(currency);
     }
 
     private void Finish()

@@ -231,6 +231,14 @@ public class MainWindow : Window, IDisposable
         bool canStart = _autoJoin && _automation.Idle && Service.ClientState.TerritoryType == 1197 && Service.ObjectTable.LocalPlayer != null
             && !Service.Condition[ConditionFlag.BoundByDuty] && !Service.Condition[ConditionFlag.WaitingForDutyFinder] && !Service.Condition[ConditionFlag.BetweenAreas];
         _autoShop.Update(_now, canStart);
+
+        // 在报名之前检查：声誉刷满（下一次获得会溢出）时停止自动报名
+        var cfg = _reputation.Config;
+        if (cfg.StopWhenFull && canStart && !_autoShop.IsBusy && ReputationShop.IsFull(cfg))
+        {
+            _autoJoin = false;
+            Service.ChatGui.Print($"[vfallguy] 金碟声誉已刷满（{ReputationShop.GetCurrency()}/{ReputationShop.Cap}），已关闭自动报名");
+        }
     }
 
     private void OnAutoShopFailed(string reason)
@@ -303,7 +311,16 @@ public class MainWindow : Window, IDisposable
             cfg.Save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("开启 Auto register 时，在大厅中金碟声誉达到阈值后，通过 GatherBuddy Reborn 购买下方勾选的物品，再走回节目登记员继续报名");
+            ImGui.SetTooltip("开启 Auto register 时，在大厅中金碟声誉达到阈值后，通过 GatherBuddy Reborn 购买下方勾选的物品，再走回节目登记员继续报名\n没有需要购买的物品时跳过，继续报名");
+
+        var stopWhenFull = cfg.StopWhenFull;
+        if (ImGui.Checkbox("刷满后停止自动报名", ref stopWhenFull))
+        {
+            cfg.StopWhenFull = stopWhenFull;
+            cfg.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("金碟声誉已满，或剩余空间不足一次获得量（按最近记录的最大单次获得量估算）时，在下一次报名前关闭 Auto register");
 
         var threshold = cfg.AutoShopThreshold;
         ImGui.SetNextItemWidth(150);
