@@ -6,7 +6,7 @@
 			(upstream 0.0.0.12 -> 0.0.0.12001), so fork builds sort above the
 			matching upstream release and below the next one.
 		-->
-		<Version>0.0.0.12004</Version>
+		<Version>0.0.0.12005</Version>
 		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
 

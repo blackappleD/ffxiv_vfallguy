@@ -155,7 +155,9 @@ public class AutoShopStateMachine : IDisposable
         Service.Log.Info($"AutoShop: triggered at {currency}/{_config.AutoShopThreshold}");
         if (!_ipc.GbrReady)
         {
-            Fail(_ipc.GbrVersion == 0 ? "GatherBuddy Reborn 未加载" : "GatherBuddy Reborn 版本过低，请更新");
+            Fail(_ipc.GbrVersion == 0 ? "GatherBuddy Reborn 未加载"
+                : _ipc.GbrVersion < GatherBuddyIPC.RequiredGbrIpcVersion ? "GatherBuddy Reborn 版本过低，请更新"
+                : "GatherBuddy Reborn 的购买清单接口未注册，请更新 GatherBuddy Reborn");
             return;
         }
         if (!_ipc.NavReady)
@@ -184,6 +186,11 @@ public class AutoShopStateMachine : IDisposable
         }
 
         var written = _ipc.ReplaceList(requests);
+        if (written == int.MinValue)
+        {
+            Fail("调用 GBR 购买清单接口失败（接口未注册或已卸载），请更新 GatherBuddy Reborn");
+            return;
+        }
         if (written is GatherBuddyIPC.ReplaceBusy or GatherBuddyIPC.ReplaceNotReady)
         {
             _nextAttempt = now.AddSeconds(RetryInterval);
@@ -198,6 +205,11 @@ public class AutoShopStateMachine : IDisposable
             Service.Log.Warning($"AutoShop: GBR resolved only {written}/{requests.Length} items");
 
         var started = _ipc.StartList();
+        if (started == int.MinValue)
+        {
+            Fail("调用 GBR 启动购买接口失败（接口未注册或已卸载）");
+            return;
+        }
         switch (started)
         {
             case GatherBuddyIPC.StartStarted or GatherBuddyIPC.StartAlreadyRunning or GatherBuddyIPC.StartWaitingForPreviousInteraction:

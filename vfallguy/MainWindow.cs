@@ -333,6 +333,8 @@ public class MainWindow : Window, IDisposable
                 ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "需要安装并启用 GatherBuddy Reborn");
             else if (gbrVersion < GatherBuddyIPC.RequiredGbrIpcVersion)
                 ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), $"GatherBuddy Reborn 版本过低（IPC {gbrVersion}，需要 {GatherBuddyIPC.RequiredGbrIpcVersion}+）");
+            else if (!_ipc.GbrListApiRegistered)
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "GatherBuddy Reborn 的购买清单接口未注册，请更新 GatherBuddy Reborn");
             if (!_ipc.NavReady)
                 ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "需要安装并启用 vnavmesh");
         }

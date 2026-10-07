@@ -53,6 +53,7 @@ public class GatherBuddyIPC : IDisposable
     public void Dispose() { }
 
     private int _cachedGbrVersion;
+    private bool _cachedGbrListApi;
     private bool _cachedNavReady;
     private DateTime _nextAvailabilityCheck;
 
@@ -65,7 +66,16 @@ public class GatherBuddyIPC : IDisposable
             return _cachedGbrVersion;
         }
     }
-    public bool GbrReady => GbrVersion >= RequiredGbrIpcVersion;
+    // 购买清单相关接口都已注册（版本号够但接口没注册时也视为不可用）
+    public bool GbrListApiRegistered
+    {
+        get
+        {
+            RefreshAvailability();
+            return _cachedGbrListApi;
+        }
+    }
+    public bool GbrReady => GbrVersion >= RequiredGbrIpcVersion && GbrListApiRegistered;
 
     public int ReplaceList((uint ItemId, uint TargetQuantity)[] items) => Try(() => _gbrReplace.InvokeFunc(ListName, items), int.MinValue);
     public int StartList() => Try(() => _gbrStart.InvokeFunc(ListName), int.MinValue);
@@ -93,6 +103,7 @@ public class GatherBuddyIPC : IDisposable
             return;
         _nextAvailabilityCheck = now.AddSeconds(1);
         _cachedGbrVersion = Try(() => _gbrVersion.InvokeFunc(), 0);
+        _cachedGbrListApi = Try(() => _gbrReplace.HasFunction && _gbrStart.HasFunction && _gbrIsBusy.HasFunction, false);
         _cachedNavReady = Try(() => _navIsReady.InvokeFunc(), false);
     }
 
