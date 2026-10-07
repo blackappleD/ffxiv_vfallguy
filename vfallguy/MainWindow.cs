@@ -15,6 +15,8 @@ public class MainWindow : Window, IDisposable
     private DebugDrawer _drawer = new();
     private AutoJoinLeave _automation = new();
     private ReputationTracker _reputation;
+    private GatherBuddyIPC _ipc;
+    private AutoShopStateMachine _autoShop;
     private Map? _map;
     private DateTime _now;
     private Vector3 _prevPos;
@@ -38,6 +40,8 @@ public class MainWindow : Window, IDisposable
         RespectCloseHotkey = false;
         _reputation = new(config);
         _reputation.ReputationGained += OnReputationGained;
+        _ipc = new(Service.PluginInterface);
+        _autoShop = new(config, _ipc);
     }
 
     public void Dispose()
@@ -46,6 +50,8 @@ public class MainWindow : Window, IDisposable
         _gameEvents.Dispose();
         _automation.Dispose();
         _reputation.Dispose();
+        _autoShop.Dispose();
+        _ipc.Dispose();
     }
 
     public unsafe override void PreOpenCheck()
@@ -66,6 +72,7 @@ public class MainWindow : Window, IDisposable
         UpdateAutoJoin();
         UpdateAutoLeave();
         UpdateReputationTracking();
+        UpdateAutoShop();
         DrawOverlays();
 
         _drawer.DrawWorldPrimitives();
@@ -109,6 +116,7 @@ public class MainWindow : Window, IDisposable
         ImGui.Checkbox("Show proposed path", ref _showPathfind);
 
         DrawReputationStats();
+        DrawAutoShop();
 
         if (_map != null)
         {
@@ -166,6 +174,9 @@ public class MainWindow : Window, IDisposable
     private void UpdateAutoJoin()
     {
         bool wantAutoJoin = _autoJoin && _automation.Idle && IsOpen && Service.ClientState.TerritoryType == 1197 && !Service.Condition[ConditionFlag.WaitingForDutyFinder] && !Service.Condition[ConditionFlag.BetweenAreas];
+        // 自动购物期间暂停自动报名
+        if (_autoShop.ShouldSuspendAutoJoin())
+            wantAutoJoin = false;
         if (!wantAutoJoin)
         {
             _autoJoinAt = DateTime.MaxValue;
@@ -214,6 +225,21 @@ public class MainWindow : Window, IDisposable
         _reputation.Update(_now, inDuty || queueing);
     }
 
+    private int GetCurrentMGP()
+    {
+        // 金碟货币 ID = 29
+        unsafe
+        {
+            var im = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager.Instance();
+            return im != null ? im->GetInventoryItemCount(29) : 0;
+        }
+    }
+
+    private void UpdateAutoShop()
+    {
+        _autoShop.Update(_now, GetCurrentMGP(), _autoJoin);
+    }
+
     private void OnReputationGained(int amount)
     {
         if (!_reputation.Config.LeaveOnReputation || Service.ClientState.TerritoryType != 1165 || !Service.Condition[ConditionFlag.BoundByDuty])
@@ -259,6 +285,59 @@ public class MainWindow : Window, IDisposable
             }
             ImGui.TreePop();
         }
+    }
+
+    private void DrawAutoShop()
+    {
+        if (!ImGui.CollapsingHeader("金碟声誉自动购物"))
+            return;
+
+        var cfg = _reputation.Config;
+        var enabled = cfg.AutoShopEnabled;
+        if (ImGui.Checkbox("开启自动购物", ref enabled))
+        {
+            cfg.AutoShopEnabled = enabled;
+            cfg.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("达到阈值后自动调用 GatherBuddy Reborn 购物并返回登记员");
+
+        ImGui.BeginDisabled(!cfg.AutoShopEnabled);
+        var threshold = cfg.AutoShopThreshold;
+        ImGui.SetNextItemWidth(150);
+        if (ImGui.InputInt("触发阈值", ref threshold, 1000, 5000))
+        {
+            cfg.AutoShopThreshold = Math.Clamp(threshold, 0, 20000);
+            cfg.Save();
+        }
+
+        var listName = cfg.AutoShopVendorList;
+        ImGui.SetNextItemWidth(250);
+        if (ImGui.InputText("GBR 购物清单名", ref listName, 128))
+        {
+            cfg.AutoShopVendorList = listName;
+            cfg.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("填写 GatherBuddy Reborn 中配置好的购物清单名称");
+
+        var currentMGP = GetCurrentMGP();
+        ImGui.TextUnformatted($"当前金碟声誉: {currentMGP:N0}");
+        if (_autoShop.IsBusy)
+        {
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"状态: {_autoShop.StatusText}");
+            if (ImGui.Button("中止购物"))
+                _autoShop.Abort();
+        }
+        else if (!_ipc.GatherBuddyAvailable)
+        {
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "警告: GatherBuddy Reborn 未安装或未加载");
+        }
+        else if (!_ipc.VNavmeshAvailable)
+        {
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "警告: vnavmesh 未安装或未加载");
+        }
+        ImGui.EndDisabled();
     }
 
     private void DrawOverlays()

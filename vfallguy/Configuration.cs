@@ -19,6 +19,11 @@ public class Configuration : IPluginConfiguration
     // 获得金碟声誉后立即退出副本
     public bool LeaveOnReputation { get; set; } = true;
 
+    // 金碟声誉自动购物
+    public bool AutoShopEnabled { get; set; } = false;
+    public int AutoShopThreshold { get; set; } = 19000;
+    public string AutoShopVendorList { get; set; } = "";
+
     // 金碟声誉统计（自上次重置起）
     public DateTime StatsSince { get; set; } = DateTime.Now;
     public double TrackedSeconds { get; set; }
