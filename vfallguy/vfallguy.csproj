@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
 	<PropertyGroup>
-		<Version>0.0.0.0</Version>
+		<!--
+			Fork versioning: upstream's 4th segment x1000 plus a local revision
+			(upstream 0.0.0.12 -> 0.0.0.12001), so fork builds sort above the
+			matching upstream release and below the next one.
+		-->
+		<Version>0.0.0.12001</Version>
 		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
 

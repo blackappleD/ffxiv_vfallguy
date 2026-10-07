@@ -1,8 +1,9 @@
 {
-  "Author": "veyn",
+  "Author": "veyn, blackappleD",
   "Name": "vfallguy",
   "Punchline": "Get that achievement!",
-  "Description": "Auto join/leave to try fishing for solo instance, highlight of aoes on last stage.",
+  "Description": "Auto join/leave to try fishing for solo instance, highlight of aoes on last stage.\n国服维护版：获得金碟声誉后立即退出副本，并统计金碟声誉记录与平均每小时获得量。",
+  "RepoUrl": "https://github.com/blackappleD/ffxiv_vfallguy",
   "InternalName": "vfallguy",
   "ApplicableVersion": "any",
   "IconUrl": "https://raw.githubusercontent.com/awgil/ffxiv_vfallguy/3af43e6f7b7e63c6527ffa4ecc54190034bd60c4/icon2.png"

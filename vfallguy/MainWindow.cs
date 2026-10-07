@@ -14,6 +14,7 @@ public class MainWindow : Window, IDisposable
     private GameEvents _gameEvents = new();
     private DebugDrawer _drawer = new();
     private AutoJoinLeave _automation = new();
+    private ReputationTracker _reputation;
     private Map? _map;
     private DateTime _now;
     private Vector3 _prevPos;
@@ -31,10 +32,12 @@ public class MainWindow : Window, IDisposable
     private float _autoLeaveDelay = 3;
     private int _autoLeaveLimit = 1;
 
-    public MainWindow() : base("vfailguy")
+    public MainWindow(Configuration config) : base("vfailguy")
     {
         ShowCloseButton = false;
         RespectCloseHotkey = false;
+        _reputation = new(config);
+        _reputation.ReputationGained += OnReputationGained;
     }
 
     public void Dispose()
@@ -42,6 +45,7 @@ public class MainWindow : Window, IDisposable
         _map?.Dispose();
         _gameEvents.Dispose();
         _automation.Dispose();
+        _reputation.Dispose();
     }
 
     public unsafe override void PreOpenCheck()
@@ -61,6 +65,7 @@ public class MainWindow : Window, IDisposable
         UpdateMap();
         UpdateAutoJoin();
         UpdateAutoLeave();
+        UpdateReputationTracking();
         DrawOverlays();
 
         _drawer.DrawWorldPrimitives();
@@ -93,9 +98,17 @@ public class MainWindow : Window, IDisposable
                 ImGui.SliderInt("Limit", ref _autoLeaveLimit, 1, 23);
             }
         }
+        var leaveOnReputation = _reputation.Config.LeaveOnReputation;
+        if (ImGui.Checkbox("获得金碟声誉后立即退出", ref leaveOnReputation))
+        {
+            _reputation.Config.LeaveOnReputation = leaveOnReputation;
+            _reputation.Config.Save();
+        }
         ImGui.Checkbox("Show AOE zones", ref _showAOEs);
         ImGui.Checkbox("Show AOE debug text", ref _showAOEText);
         ImGui.Checkbox("Show proposed path", ref _showPathfind);
+
+        DrawReputationStats();
 
         if (_map != null)
         {
@@ -190,6 +203,61 @@ public class MainWindow : Window, IDisposable
             Service.Log.Debug($"Auto-leaving: {_numPlayersInDuty} players");
             _automation.LeaveDuty();
             _autoLeaveAt = DateTime.MaxValue;
+        }
+    }
+
+    private void UpdateReputationTracking()
+    {
+        // 计时范围：在副本内，或在大厅中排队/开启自动报名；在大厅闲置不计入
+        bool inDuty = Service.ClientState.TerritoryType == 1165;
+        bool queueing = Service.ClientState.TerritoryType == 1197 && (_autoJoin || Service.Condition[ConditionFlag.WaitingForDutyFinder]);
+        _reputation.Update(_now, inDuty || queueing);
+    }
+
+    private void OnReputationGained(int amount)
+    {
+        if (!_reputation.Config.LeaveOnReputation || Service.ClientState.TerritoryType != 1165 || !Service.Condition[ConditionFlag.BoundByDuty])
+            return;
+        Service.Log.Debug($"Leaving after gaining {amount} reputation");
+        Service.ChatGui.Print($"获得 {amount} 金碟声誉，立即退出副本");
+        _automation.LeaveDuty();
+    }
+
+    private void DrawReputationStats()
+    {
+        if (!ImGui.CollapsingHeader("金碟声誉统计", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        var cfg = _reputation.Config;
+        var tracked = TimeSpan.FromSeconds(cfg.TrackedSeconds);
+        ImGui.TextUnformatted($"平均每小时: {_reputation.PerHour:f0}");
+        ImGui.TextUnformatted($"累计获得: {cfg.TotalReputation} (共 {cfg.RewardCount} 次, 平均每次 {_reputation.PerReward:f1})");
+        ImGui.TextUnformatted($"统计时长: {(int)tracked.TotalHours}:{tracked.Minutes:d2}:{tracked.Seconds:d2} (自 {cfg.StatsSince:yyyy-MM-dd HH:mm} 起)");
+        if (ImGui.Button("重置统计") && ImGui.GetIO().KeyCtrl)
+            _reputation.Reset();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("按住 Ctrl 点击以重置");
+
+        if (cfg.Records.Count > 0 && ImGui.TreeNode($"最近记录 ({cfg.Records.Count})###reprecords"))
+        {
+            using (var table = ImRaii.Table("reprecords", 2, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.ScrollY, new(0, 150)))
+            {
+                if (table)
+                {
+                    ImGui.TableSetupColumn("时间");
+                    ImGui.TableSetupColumn("数量");
+                    ImGui.TableHeadersRow();
+                    for (int i = cfg.Records.Count - 1; i >= 0; --i)
+                    {
+                        ImGui.TableNextRow();
+                        ImGui.TableNextColumn();
+                        ImGui.TextUnformatted($"{cfg.Records[i].Time:MM-dd HH:mm:ss}");
+                        ImGui.TableNextColumn();
+                        ImGui.TextUnformatted($"{cfg.Records[i].Amount}");
+                    }
+                }
+            }
+            ImGui.TreePop();
         }
     }
 

@@ -1,4 +1,16 @@
 # ffxiv_vfallguy dalamud plugin
+
+> 本仓库是 [awgil/ffxiv_vfallguy](https://github.com/awgil/ffxiv_vfallguy) 的国服维护版（InternalName 保持 `vfallguy`，请勿与原版同时安装）。
+>
+> 插件仓库地址：`https://raw.githubusercontent.com/blackappleD/DalamudPlugins/main/repo.json`
+>
+> 国服维护版新增：
+> - **获得金碟声誉后立即退出**：聊天栏出现「获得了N个金碟声誉」时自动退出副本（默认开启，可在窗口中关闭）。
+> - **金碟声誉统计**：记录每次获得的金碟声誉，显示累计获得、次数、统计时长和平均每小时获得量；数据会保存，可按住 Ctrl 点击「重置统计」清零。
+>   统计时长只计算在副本内、或在大厅中排队/开启 Auto register 的时间，在大厅闲置不计入。
+>
+> 版本规则：上游第 4 段 ×1000 + 本地修订（上游 0.0.0.12 → 0.0.0.12001 起）。发布方式：本地 `dotnet build -c Release`，
+> 将 `vfallguy/bin/Release/vfallguy/latest.zip` 复制为 `vfallguy.zip` 后用 `gh release create v<版本号>` 上传。
 vFallguy dalamud plugin aims to make the Fall Guys Collaboration event in FFXIV less of a hassle
 
 Dalamud repository:

@@ -14,7 +14,8 @@ public sealed class Plugin : IDalamudPlugin
     {
         dalamud.Create<Service>();
 
-        _wnd = new();
+        var config = dalamud.GetPluginConfig() as Configuration ?? new();
+        _wnd = new(config);
         WindowSystem.AddWindow(_wnd);
 
         Dalamud = dalamud;
