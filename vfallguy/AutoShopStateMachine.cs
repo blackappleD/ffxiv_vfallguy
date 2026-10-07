@@ -196,13 +196,21 @@ public class AutoShopStateMachine : IDisposable
             _nextAttempt = now.AddSeconds(RetryInterval);
             return;
         }
-        if (written <= 0)
+        if (written == 0)
+        {
+            Fail("GBR 无法为所选物品找到支持自动购买的商人（当前 GBR 版本可能不支持金碟声誉兑换员）");
+            return;
+        }
+        if (written < 0)
         {
             Fail($"写入 GBR 购买清单失败（{written}）");
             return;
         }
         if (written < requests.Length)
+        {
             Service.Log.Warning($"AutoShop: GBR resolved only {written}/{requests.Length} items");
+            Service.ChatGui.Print($"[vfallguy] GBR 只写入了 {written}/{requests.Length} 个物品，其余物品无法自动购买");
+        }
 
         var started = _ipc.StartList();
         if (started == int.MinValue)
