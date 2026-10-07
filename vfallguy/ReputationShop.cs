@@ -56,20 +56,36 @@ public static class ReputationShop
     private static List<ShopItem> LoadItems()
     {
         var result = new Dictionary<uint, ShopItem>();
-        foreach (var shop in Service.DataManager.GetExcelSheet<SpecialShop>())
+        try
         {
-            foreach (var entry in shop.Item)
+            foreach (var shop in Service.DataManager.GetExcelSheet<SpecialShop>())
             {
-                var cost = entry.ItemCosts.FirstOrDefault(c => c.ItemCost.RowId == CurrencyItemId);
-                if (cost.ItemCost.RowId != CurrencyItemId)
-                    continue;
-                foreach (var receive in entry.ReceiveItems)
+                foreach (var entry in shop.Item)
                 {
-                    if (receive.Item.RowId == 0 || result.ContainsKey(receive.Item.RowId) || receive.Item.ValueNullable is not { } row)
+                    // 注意不能用 FirstOrDefault：Lumina 的默认结构体没有数据页，读取属性会空引用
+                    uint cost = 0;
+                    foreach (var c in entry.ItemCosts)
+                    {
+                        if (c.ItemCost.RowId == CurrencyItemId)
+                        {
+                            cost = c.CurrencyCost;
+                            break;
+                        }
+                    }
+                    if (cost == 0)
                         continue;
-                    result[row.RowId] = new(row.RowId, row.Name.ExtractText(), row.Icon, cost.CurrencyCost, row);
+                    foreach (var receive in entry.ReceiveItems)
+                    {
+                        if (receive.Item.RowId == 0 || result.ContainsKey(receive.Item.RowId) || receive.Item.ValueNullable is not { } row)
+                            continue;
+                        result[row.RowId] = new(row.RowId, row.Name.ExtractText(), row.Icon, cost, row);
+                    }
                 }
             }
+        }
+        catch (Exception e)
+        {
+            Service.Log.Error($"Failed to load reputation shop items: {e}");
         }
         Service.Log.Debug($"Loaded {result.Count} reputation shop items");
         return [.. result.Values.OrderByDescending(i => i.Cost).ThenBy(i => i.ItemId)];
