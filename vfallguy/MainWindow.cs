@@ -42,6 +42,7 @@ public class MainWindow : Window, IDisposable
         _reputation.ReputationGained += OnReputationGained;
         _ipc = new(Service.PluginInterface);
         _autoShop = new(config, _ipc);
+        _autoShop.Failed += OnAutoShopFailed;
     }
 
     public void Dispose()
@@ -69,10 +70,10 @@ public class MainWindow : Window, IDisposable
         IsOpen = Service.ClientState.TerritoryType is 1165 or 1197;
 
         UpdateMap();
+        UpdateAutoShop();
         UpdateAutoJoin();
         UpdateAutoLeave();
         UpdateReputationTracking();
-        UpdateAutoShop();
         DrawOverlays();
 
         _drawer.DrawWorldPrimitives();
@@ -175,7 +176,7 @@ public class MainWindow : Window, IDisposable
     {
         bool wantAutoJoin = _autoJoin && _automation.Idle && IsOpen && Service.ClientState.TerritoryType == 1197 && !Service.Condition[ConditionFlag.WaitingForDutyFinder] && !Service.Condition[ConditionFlag.BetweenAreas];
         // 自动购物期间暂停自动报名
-        if (_autoShop.ShouldSuspendAutoJoin())
+        if (_autoShop.IsBusy)
             wantAutoJoin = false;
         if (!wantAutoJoin)
         {
@@ -225,19 +226,18 @@ public class MainWindow : Window, IDisposable
         _reputation.Update(_now, inDuty || queueing);
     }
 
-    private int GetCurrentMGP()
-    {
-        // 金碟货币 ID = 29
-        unsafe
-        {
-            var im = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager.Instance();
-            return im != null ? im->GetInventoryItemCount(29) : 0;
-        }
-    }
-
     private void UpdateAutoShop()
     {
-        _autoShop.Update(_now, GetCurrentMGP(), _autoJoin);
+        bool canStart = _autoJoin && _automation.Idle && Service.ClientState.TerritoryType == 1197 && Service.ObjectTable.LocalPlayer != null
+            && !Service.Condition[ConditionFlag.BoundByDuty] && !Service.Condition[ConditionFlag.WaitingForDutyFinder] && !Service.Condition[ConditionFlag.BetweenAreas];
+        _autoShop.Update(_now, canStart);
+    }
+
+    private void OnAutoShopFailed(string reason)
+    {
+        // 无法花掉金碟声誉时停止刷取，防止溢出
+        _autoJoin = false;
+        Service.ChatGui.PrintError($"[vfallguy] 自动购物失败：{reason}。已关闭自动报名以防金碟声誉溢出。");
     }
 
     private void OnReputationGained(int amount)
@@ -293,6 +293,9 @@ public class MainWindow : Window, IDisposable
             return;
 
         var cfg = _reputation.Config;
+        var cap = ReputationShop.Cap;
+        ImGui.TextUnformatted($"当前金碟声誉: {ReputationShop.GetCurrency():N0} / {cap:N0}");
+
         var enabled = cfg.AutoShopEnabled;
         if (ImGui.Checkbox("开启自动购物", ref enabled))
         {
@@ -300,44 +303,98 @@ public class MainWindow : Window, IDisposable
             cfg.Save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("达到阈值后自动调用 GatherBuddy Reborn 购物并返回登记员");
+            ImGui.SetTooltip("开启 Auto register 时，在大厅中金碟声誉达到阈值后，通过 GatherBuddy Reborn 购买下方勾选的物品，再走回节目登记员继续报名");
 
-        ImGui.BeginDisabled(!cfg.AutoShopEnabled);
         var threshold = cfg.AutoShopThreshold;
         ImGui.SetNextItemWidth(150);
-        if (ImGui.InputInt("触发阈值", ref threshold, 1000, 5000))
+        if (ImGui.InputInt("触发阈值", ref threshold, 100, 1000))
         {
-            cfg.AutoShopThreshold = Math.Clamp(threshold, 0, 20000);
+            cfg.AutoShopThreshold = Math.Clamp(threshold, 0, cap);
             cfg.Save();
         }
 
-        var listName = cfg.AutoShopVendorList;
-        ImGui.SetNextItemWidth(250);
-        if (ImGui.InputText("GBR 购物清单名", ref listName, 128))
-        {
-            cfg.AutoShopVendorList = listName;
-            cfg.Save();
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("填写 GatherBuddy Reborn 中配置好的购物清单名称");
-
-        var currentMGP = GetCurrentMGP();
-        ImGui.TextUnformatted($"当前金碟声誉: {currentMGP:N0}");
         if (_autoShop.IsBusy)
         {
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"状态: {_autoShop.StatusText}");
-            if (ImGui.Button("中止购物"))
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), _autoShop.StatusText);
+            ImGui.SameLine();
+            if (ImGui.Button("中止"))
+            {
+                // 不再购物时必须停止刷取，否则声誉会溢出
                 _autoShop.Abort();
+                _autoJoin = false;
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("中止购物并关闭 Auto register");
         }
-        else if (!_ipc.GatherBuddyAvailable)
+        else if (cfg.AutoShopEnabled)
         {
-            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "警告: GatherBuddy Reborn 未安装或未加载");
+            var gbrVersion = _ipc.GbrVersion;
+            if (gbrVersion == 0)
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "需要安装并启用 GatherBuddy Reborn");
+            else if (gbrVersion < GatherBuddyIPC.RequiredGbrIpcVersion)
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), $"GatherBuddy Reborn 版本过低（IPC {gbrVersion}，需要 {GatherBuddyIPC.RequiredGbrIpcVersion}+）");
+            if (!_ipc.NavReady)
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "需要安装并启用 vnavmesh");
         }
-        else if (!_ipc.VNavmeshAvailable)
+
+        DrawAutoShopItems(cfg);
+    }
+
+    private void DrawAutoShopItems(Configuration cfg)
+    {
+        ImGui.TextUnformatted("勾选要购买的物品，数量为目标持有数（已学习的物品会自动跳过）:");
+        using (var table = ImRaii.Table("autoshopitems", 4, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.ScrollY, new(0, 250)))
         {
-            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "警告: vnavmesh 未安装或未加载");
+            if (table)
+            {
+                ImGui.TableSetupColumn("物品", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("花费", ImGuiTableColumnFlags.WidthFixed, 50);
+                ImGui.TableSetupColumn("持有", ImGuiTableColumnFlags.WidthFixed, 50);
+                ImGui.TableSetupColumn("目标数量", ImGuiTableColumnFlags.WidthFixed, 110);
+                ImGui.TableHeadersRow();
+                var iconSize = new Vector2(ImGui.GetTextLineHeight());
+                foreach (var item in ReputationShop.Items)
+                {
+                    using var id = ImRaii.PushId((int)item.ItemId);
+                    var learned = ReputationShop.IsLearned(item);
+                    ImGui.TableNextRow();
+
+                    ImGui.TableNextColumn();
+                    var selected = cfg.AutoShopItems.ContainsKey(item.ItemId);
+                    if (ImGui.Checkbox("##sel", ref selected))
+                    {
+                        if (selected)
+                            cfg.AutoShopItems[item.ItemId] = 1;
+                        else
+                            cfg.AutoShopItems.Remove(item.ItemId);
+                        cfg.Save();
+                    }
+                    ImGui.SameLine();
+                    ImGui.Image(Service.TextureProvider.GetFromGameIcon(new(item.IconId)).GetWrapOrEmpty().Handle, iconSize);
+                    ImGui.SameLine();
+                    using (ImRaii.PushColor(ImGuiCol.Text, 0xff808080, learned))
+                        ImGui.TextUnformatted(learned ? $"{item.Name}（已学习）" : item.Name);
+
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted($"{item.Cost}");
+
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted($"{ReputationShop.GetOwnedCount(item.ItemId)}");
+
+                    ImGui.TableNextColumn();
+                    if (cfg.AutoShopItems.TryGetValue(item.ItemId, out var target))
+                    {
+                        var qty = (int)target;
+                        ImGui.SetNextItemWidth(-1);
+                        if (ImGui.InputInt("##qty", ref qty, 1, 10))
+                        {
+                            cfg.AutoShopItems[item.ItemId] = (uint)Math.Clamp(qty, 1, 999);
+                            cfg.Save();
+                        }
+                    }
+                }
+            }
         }
-        ImGui.EndDisabled();
     }
 
     private void DrawOverlays()
