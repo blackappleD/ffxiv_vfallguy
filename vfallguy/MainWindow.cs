@@ -233,12 +233,21 @@ public class MainWindow : Window, IDisposable
             && !Service.Condition[ConditionFlag.BoundByDuty] && !Service.Condition[ConditionFlag.WaitingForDutyFinder] && !Service.Condition[ConditionFlag.BetweenAreas];
         _autoShop.Update(_now, canStart);
 
-        // 在报名之前检查：声誉刷满（下一次获得会溢出）时停止自动报名
+        // 在报名之前检查：声誉达到停止阈值，或刷满（下一次获得会溢出）时停止自动报名
         var cfg = _reputation.Config;
-        if (cfg.StopWhenFull && canStart && !_autoShop.IsBusy && ReputationShop.IsFull(cfg))
+        if (cfg.StopWhenFull && canStart && !_autoShop.IsBusy)
         {
-            _autoJoin = false;
-            Service.ChatGui.Print($"[vfallguy] {Loc.Format("ChatFull", ReputationShop.GetCurrency(), ReputationShop.Cap)}");
+            var currency = ReputationShop.GetCurrency();
+            if (currency >= cfg.StopThreshold)
+            {
+                _autoJoin = false;
+                Service.ChatGui.Print($"[vfallguy] {Loc.Format("ChatStopThreshold", currency, cfg.StopThreshold)}");
+            }
+            else if (ReputationShop.IsFull(cfg))
+            {
+                _autoJoin = false;
+                Service.ChatGui.Print($"[vfallguy] {Loc.Format("ChatFull", currency, ReputationShop.Cap)}");
+            }
         }
     }
 
@@ -337,6 +346,14 @@ public class MainWindow : Window, IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(Loc.Get("ShopEnableTooltip"));
 
+        var threshold = cfg.AutoShopThreshold;
+        ImGui.SetNextItemWidth(150);
+        if (ImGui.InputInt($"{Loc.Get("ShopThreshold")}###threshold", ref threshold, 100, 1000))
+        {
+            cfg.AutoShopThreshold = Math.Clamp(threshold, 0, cap);
+            cfg.Save();
+        }
+
         var stopWhenFull = cfg.StopWhenFull;
         if (ImGui.Checkbox($"{Loc.Get("StopWhenFull")}###stopwhenfull", ref stopWhenFull))
         {
@@ -346,12 +363,15 @@ public class MainWindow : Window, IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(Loc.Get("StopWhenFullTooltip"));
 
-        var threshold = cfg.AutoShopThreshold;
-        ImGui.SetNextItemWidth(150);
-        if (ImGui.InputInt($"{Loc.Get("ShopThreshold")}###threshold", ref threshold, 100, 1000))
+        using (ImRaii.Disabled(!cfg.StopWhenFull))
         {
-            cfg.AutoShopThreshold = Math.Clamp(threshold, 0, cap);
-            cfg.Save();
+            var stopThreshold = cfg.StopThreshold;
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.InputInt($"{Loc.Get("StopThreshold")}###stopthreshold", ref stopThreshold, 100, 1000))
+            {
+                cfg.StopThreshold = Math.Clamp(stopThreshold, 0, cap);
+                cfg.Save();
+            }
         }
 
         if (_autoShop.IsBusy)
@@ -386,6 +406,7 @@ public class MainWindow : Window, IDisposable
     private void DrawAutoShopItems(Configuration cfg)
     {
         ImGui.TextUnformatted(Loc.Get("ShopItemsHint"));
+        long totalCost = 0, remainingCost = 0;
         using (var table = ImRaii.Table("autoshopitems", 4, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.ScrollY, new(0, 250)))
         {
             if (table)
@@ -422,11 +443,17 @@ public class MainWindow : Window, IDisposable
                     ImGui.TextUnformatted($"{item.Cost}");
 
                     ImGui.TableNextColumn();
-                    ImGui.TextUnformatted($"{ReputationShop.GetOwnedCount(item.ItemId)}");
+                    var owned = ReputationShop.GetOwnedCount(item.ItemId);
+                    ImGui.TextUnformatted($"{owned}");
 
                     ImGui.TableNextColumn();
                     if (cfg.AutoShopItems.TryGetValue(item.ItemId, out var target))
                     {
+                        // 总花费按目标数量计算；还需花费扣除已持有数量，已学习的物品不再购买
+                        totalCost += (long)item.Cost * target;
+                        if (!learned)
+                            remainingCost += (long)item.Cost * Math.Max(0, (int)target - owned);
+
                         var qty = (int)target;
                         ImGui.SetNextItemWidth(-1);
                         if (ImGui.InputInt("##qty", ref qty, 1, 10))
@@ -438,6 +465,7 @@ public class MainWindow : Window, IDisposable
                 }
             }
         }
+        ImGui.TextUnformatted(Loc.Format("ShopTotalCost", totalCost, remainingCost));
     }
 
     private void DrawOverlays()
