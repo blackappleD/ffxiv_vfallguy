@@ -36,9 +36,9 @@ public class AutoShopStateMachine : IDisposable
     public bool IsBusy => _state != State.Idle;
     public string StatusText => _state switch
     {
-        State.PushList => "正在写入 GBR 购买清单...",
-        State.WaitShop => $"GBR 购买中: {_ipc.ListStatus()}",
-        State.ReturnToNpc or State.WaitArrival => "正在走回节目登记员...",
+        State.PushList => Loc.Get("StatusPushList"),
+        State.WaitShop => Loc.Format("StatusShopping", _ipc.ListStatus()),
+        State.ReturnToNpc or State.WaitArrival => Loc.Get("StatusReturning"),
         _ => "",
     };
 
@@ -71,7 +71,7 @@ public class AutoShopStateMachine : IDisposable
                     if ((now - _stateStart).TotalSeconds > ShopTimeout)
                     {
                         _ipc.StopList();
-                        Fail("GBR 购买超时");
+                        Fail(Loc.Get("FailShopTimeout"));
                     }
                     break;
                 }
@@ -79,7 +79,7 @@ public class AutoShopStateMachine : IDisposable
                 Service.Log.Info($"AutoShop: run finished, outcome={outcome}, hitCurrencyLimit={hitCurrencyLimit}");
                 if (outcome is GatherBuddyIPC.OutcomeFailed or GatherBuddyIPC.OutcomeStopped)
                 {
-                    Fail($"GBR 购买未完成: {_ipc.ListStatus()}");
+                    Fail(Loc.Format("FailShopIncomplete", _ipc.ListStatus()));
                     break;
                 }
                 var remaining = ReputationShop.GetCurrency();
@@ -87,11 +87,11 @@ public class AutoShopStateMachine : IDisposable
                 {
                     // 一件没买成：声誉变化之前不再触发，避免买不到时反复往返
                     _suppressedAtCurrency = remaining;
-                    Service.ChatGui.Print($"[vfallguy] 本次没有买到物品，正在走回节目登记员继续自动报名");
+                    Service.ChatGui.Print($"[vfallguy] {Loc.Get("ChatShopNothingBought")}");
                 }
                 else
                 {
-                    Service.ChatGui.Print($"[vfallguy] 购买完成，剩余金碟声誉 {remaining}，正在走回节目登记员");
+                    Service.ChatGui.Print($"[vfallguy] {Loc.Format("ChatShopDone", remaining)}");
                 }
                 Enter(State.ReturnToNpc, now);
                 break;
@@ -99,14 +99,14 @@ public class AutoShopStateMachine : IDisposable
             case State.ReturnToNpc:
                 if ((now - _stateStart).TotalSeconds > ReturnTimeout)
                 {
-                    Fail("走回节目登记员超时");
+                    Fail(Loc.Get("FailReturnTimeout"));
                     break;
                 }
                 if (Service.Condition[ConditionFlag.BetweenAreas] || Service.Condition[ConditionFlag.OccupiedInEvent])
                     break; // 等待商店窗口关闭
                 if (FindRegistrator() is not { } dest)
                 {
-                    Fail("找不到节目登记员");
+                    Fail(Loc.Get("FailNoRegistrar"));
                     break;
                 }
                 if (DistanceToPlayer(dest) <= RegistratorRange + 1)
@@ -116,7 +116,7 @@ public class AutoShopStateMachine : IDisposable
                 }
                 if (!_ipc.MoveCloseTo(dest, RegistratorRange))
                 {
-                    Fail("vnavmesh 寻路失败");
+                    Fail(Loc.Get("FailNavFailed"));
                     break;
                 }
                 Enter(State.WaitArrival, now);
@@ -126,7 +126,7 @@ public class AutoShopStateMachine : IDisposable
                 if (FindRegistrator() is not { } target)
                 {
                     _ipc.StopNav();
-                    Fail("找不到节目登记员");
+                    Fail(Loc.Get("FailNoRegistrar"));
                 }
                 else if (DistanceToPlayer(target) <= RegistratorRange + 1)
                 {
@@ -136,7 +136,7 @@ public class AutoShopStateMachine : IDisposable
                 else if ((now - _stateStart).TotalSeconds > ArrivalTimeout)
                 {
                     _ipc.StopNav();
-                    Fail("走回节目登记员超时");
+                    Fail(Loc.Get("FailReturnTimeout"));
                 }
                 else if ((now - _stateStart).TotalSeconds > 1 && !_ipc.NavBusy)
                 {
@@ -180,7 +180,7 @@ public class AutoShopStateMachine : IDisposable
     {
         if (!_skipNotified)
         {
-            Service.ChatGui.Print($"[vfallguy] 金碟声誉 {currency} 已达到阈值，但没有需要购买的物品，继续自动报名");
+            Service.ChatGui.Print($"[vfallguy] {Loc.Format("ChatShopSkip", currency)}");
             _skipNotified = true;
         }
     }
@@ -190,17 +190,17 @@ public class AutoShopStateMachine : IDisposable
         Service.Log.Info($"AutoShop: triggered at {currency}/{_config.AutoShopThreshold}");
         if (!_ipc.GbrReady)
         {
-            Fail(_ipc.GbrVersion == 0 ? "GatherBuddy Reborn 未加载"
-                : _ipc.GbrVersion < GatherBuddyIPC.RequiredGbrIpcVersion ? "GatherBuddy Reborn 版本过低，请更新"
-                : "GatherBuddy Reborn 的购买清单接口未注册，请更新 GatherBuddy Reborn");
+            Fail(Loc.Get(_ipc.GbrVersion == 0 ? "FailGbrMissing"
+                : _ipc.GbrVersion < GatherBuddyIPC.RequiredGbrIpcVersion ? "FailGbrOutdated"
+                : "FailGbrApiMissing"));
             return;
         }
         if (!_ipc.NavReady)
         {
-            Fail("vnavmesh 未加载或导航网格未就绪");
+            Fail(Loc.Get("FailNavMissing"));
             return;
         }
-        Service.ChatGui.Print($"[vfallguy] 金碟声誉达到 {currency}，开始自动购物");
+        Service.ChatGui.Print($"[vfallguy] {Loc.Format("ChatShopStart", currency)}");
         _currencyAtStart = currency;
         Enter(State.PushList, now);
         _nextAttempt = now;
@@ -210,7 +210,7 @@ public class AutoShopStateMachine : IDisposable
     {
         if ((now - _stateStart).TotalSeconds > PushTimeout)
         {
-            Fail("GBR 商店数据长时间未就绪");
+            Fail(Loc.Get("FailDataTimeout"));
             return;
         }
 
@@ -224,7 +224,7 @@ public class AutoShopStateMachine : IDisposable
         var written = _ipc.ReplaceList(requests);
         if (written == int.MinValue)
         {
-            Fail("调用 GBR 购买清单接口失败（接口未注册或已卸载），请更新 GatherBuddy Reborn");
+            Fail(Loc.Get("FailReplaceIpc"));
             return;
         }
         if (written is GatherBuddyIPC.ReplaceBusy or GatherBuddyIPC.ReplaceNotReady)
@@ -234,24 +234,24 @@ public class AutoShopStateMachine : IDisposable
         }
         if (written == 0)
         {
-            Fail("GBR 无法为所选物品找到支持自动购买的商人（当前 GBR 版本可能不支持金碟声誉兑换员）");
+            Fail(Loc.Get("FailNoVendor"));
             return;
         }
         if (written < 0)
         {
-            Fail($"写入 GBR 购买清单失败（{written}）");
+            Fail(Loc.Format("FailReplace", written));
             return;
         }
         if (written < requests.Length)
         {
             Service.Log.Warning($"AutoShop: GBR resolved only {written}/{requests.Length} items");
-            Service.ChatGui.Print($"[vfallguy] GBR 只写入了 {written}/{requests.Length} 个物品，其余物品无法自动购买");
+            Service.ChatGui.Print($"[vfallguy] {Loc.Format("ChatShopPartial", written, requests.Length)}");
         }
 
         var started = _ipc.StartList();
         if (started == int.MinValue)
         {
-            Fail("调用 GBR 启动购买接口失败（接口未注册或已卸载）");
+            Fail(Loc.Get("FailStartIpc"));
             return;
         }
         switch (started)
@@ -267,7 +267,7 @@ public class AutoShopStateMachine : IDisposable
                 SkipAndResume(ReputationShop.GetCurrency());
                 break;
             default:
-                Fail($"启动 GBR 购买失败（{started}）: {_ipc.ListStatus()}");
+                Fail(Loc.Format("FailStart", started, _ipc.ListStatus()));
                 break;
         }
     }
@@ -282,7 +282,7 @@ public class AutoShopStateMachine : IDisposable
 
     private void Finish()
     {
-        Service.ChatGui.Print("[vfallguy] 已回到节目登记员，继续自动报名");
+        Service.ChatGui.Print($"[vfallguy] {Loc.Get("ChatShopReturned")}");
         _state = State.Idle;
     }
 

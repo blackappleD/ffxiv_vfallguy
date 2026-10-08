@@ -15,6 +15,7 @@ public sealed class Plugin : IDalamudPlugin
         dalamud.Create<Service>();
 
         var config = dalamud.GetPluginConfig() as Configuration ?? new();
+        Loc.Init(config);
         _wnd = new(config);
         WindowSystem.AddWindow(_wnd);
 
@@ -28,5 +29,6 @@ public sealed class Plugin : IDalamudPlugin
     {
         WindowSystem.RemoveAllWindows();
         _wnd.Dispose();
+        Loc.Dispose();
     }
 }

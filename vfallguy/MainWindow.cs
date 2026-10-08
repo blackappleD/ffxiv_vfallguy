@@ -81,40 +81,41 @@ public class MainWindow : Window, IDisposable
 
     public unsafe override void Draw()
     {
-        if (ImGui.Button("Queue"))
+        if (ImGui.Button($"{Loc.Get("Queue")}###queue"))
             _automation.RegisterForDuty();
         ImGui.SameLine();
-        if (ImGui.Button("Leave"))
+        if (ImGui.Button($"{Loc.Get("Leave")}###leave"))
             _automation.LeaveDuty();
         ImGui.SameLine();
-        ImGui.TextUnformatted($"Num players in duty: {_numPlayersInDuty} (autoleave: {(_autoLeaveAt == DateTime.MaxValue ? "never" : $"in {(_autoLeaveAt - _now).TotalSeconds:f1}s")})");
+        ImGui.TextUnformatted(Loc.Format("PlayersInDuty", _numPlayersInDuty, _autoLeaveAt == DateTime.MaxValue ? Loc.Get("AutoLeaveNever") : Loc.Format("AutoLeaveIn", (_autoLeaveAt - _now).TotalSeconds)));
 
-        ImGui.Checkbox("Auto register", ref _autoJoin);
+        ImGui.Checkbox($"{Loc.Get("AutoRegister")}###autojoin", ref _autoJoin);
         if (_autoJoin)
         {
             using (ImRaii.PushIndent())
             {
-                ImGui.SliderFloat("Delay###j", ref _autoJoinDelay, 0, 10);
+                ImGui.SliderFloat($"{Loc.Get("Delay")}###j", ref _autoJoinDelay, 0, 10);
             }
         }
-        ImGui.Checkbox("Auto leave if not solo", ref _autoLeaveIfNotSolo);
+        ImGui.Checkbox($"{Loc.Get("AutoLeaveNotSolo")}###autoleave", ref _autoLeaveIfNotSolo);
         if (_autoLeaveIfNotSolo)
         {
             using (ImRaii.PushIndent())
             {
-                ImGui.SliderFloat("Delay###l", ref _autoLeaveDelay, 0, 10);
-                ImGui.SliderInt("Limit", ref _autoLeaveLimit, 1, 23);
+                ImGui.SliderFloat($"{Loc.Get("Delay")}###l", ref _autoLeaveDelay, 0, 10);
+                ImGui.SliderInt($"{Loc.Get("Limit")}###limit", ref _autoLeaveLimit, 1, 23);
             }
         }
         var leaveOnReputation = _reputation.Config.LeaveOnReputation;
-        if (ImGui.Checkbox("获得金碟声誉后立即退出", ref leaveOnReputation))
+        if (ImGui.Checkbox($"{Loc.Get("LeaveOnReputation")}###leaveonrep", ref leaveOnReputation))
         {
             _reputation.Config.LeaveOnReputation = leaveOnReputation;
             _reputation.Config.Save();
         }
-        ImGui.Checkbox("Show AOE zones", ref _showAOEs);
-        ImGui.Checkbox("Show AOE debug text", ref _showAOEText);
-        ImGui.Checkbox("Show proposed path", ref _showPathfind);
+        ImGui.Checkbox($"{Loc.Get("ShowAOEs")}###showaoe", ref _showAOEs);
+        ImGui.Checkbox($"{Loc.Get("ShowAOEText")}###showaoetext", ref _showAOEText);
+        ImGui.Checkbox($"{Loc.Get("ShowPath")}###showpath", ref _showPathfind);
+        DrawLanguageSelector();
 
         DrawReputationStats();
         DrawAutoShop();
@@ -237,7 +238,7 @@ public class MainWindow : Window, IDisposable
         if (cfg.StopWhenFull && canStart && !_autoShop.IsBusy && ReputationShop.IsFull(cfg))
         {
             _autoJoin = false;
-            Service.ChatGui.Print($"[vfallguy] 金碟声誉已刷满（{ReputationShop.GetCurrency()}/{ReputationShop.Cap}），已关闭自动报名");
+            Service.ChatGui.Print($"[vfallguy] {Loc.Format("ChatFull", ReputationShop.GetCurrency(), ReputationShop.Cap)}");
         }
     }
 
@@ -245,7 +246,7 @@ public class MainWindow : Window, IDisposable
     {
         // 无法花掉金碟声誉时停止刷取，防止溢出
         _autoJoin = false;
-        Service.ChatGui.PrintError($"[vfallguy] 自动购物失败：{reason}。已关闭自动报名以防金碟声誉溢出。");
+        Service.ChatGui.PrintError($"[vfallguy] {Loc.Format("ChatShopFailed", reason)}");
     }
 
     private void OnReputationGained(int amount)
@@ -253,33 +254,56 @@ public class MainWindow : Window, IDisposable
         if (!_reputation.Config.LeaveOnReputation || Service.ClientState.TerritoryType != 1165 || !Service.Condition[ConditionFlag.BoundByDuty])
             return;
         Service.Log.Debug($"Leaving after gaining {amount} reputation");
-        Service.ChatGui.Print($"获得 {amount} 金碟声誉，立即退出副本");
+        Service.ChatGui.Print($"[vfallguy] {Loc.Format("ChatLeaveOnReputation", amount)}");
         _automation.LeaveDuty();
+    }
+
+    private void DrawLanguageSelector()
+    {
+        var cfg = _reputation.Config;
+        var followLabel = Loc.Format("LanguageFollowDalamud", Loc.GetLanguageName(Loc.DalamudLanguage));
+        var preview = string.IsNullOrEmpty(cfg.Language) ? followLabel : Loc.GetLanguageName(cfg.Language);
+        ImGui.SetNextItemWidth(200);
+        using var combo = ImRaii.Combo($"{Loc.Get("Language")} / Language###language", preview);
+        if (!combo)
+            return;
+        if (ImGui.Selectable(followLabel, string.IsNullOrEmpty(cfg.Language)))
+            SetLanguage("");
+        foreach (var (code, name) in Loc.SupportedLanguages)
+            if (ImGui.Selectable(name, cfg.Language == code))
+                SetLanguage(code);
+    }
+
+    private void SetLanguage(string code)
+    {
+        _reputation.Config.Language = code;
+        _reputation.Config.Save();
+        Loc.Apply();
     }
 
     private void DrawReputationStats()
     {
-        if (!ImGui.CollapsingHeader("金碟声誉统计", ImGuiTreeNodeFlags.DefaultOpen))
+        if (!ImGui.CollapsingHeader($"{Loc.Get("StatsHeader")}###stats", ImGuiTreeNodeFlags.DefaultOpen))
             return;
 
         var cfg = _reputation.Config;
         var tracked = TimeSpan.FromSeconds(cfg.TrackedSeconds);
-        ImGui.TextUnformatted($"平均每小时: {_reputation.PerHour:f0}");
-        ImGui.TextUnformatted($"累计获得: {cfg.TotalReputation} (共 {cfg.RewardCount} 次, 平均每次 {_reputation.PerReward:f1})");
-        ImGui.TextUnformatted($"统计时长: {(int)tracked.TotalHours}:{tracked.Minutes:d2}:{tracked.Seconds:d2} (自 {cfg.StatsSince:yyyy-MM-dd HH:mm} 起)");
-        if (ImGui.Button("重置统计") && ImGui.GetIO().KeyCtrl)
+        ImGui.TextUnformatted(Loc.Format("StatsPerHour", _reputation.PerHour));
+        ImGui.TextUnformatted(Loc.Format("StatsTotal", cfg.TotalReputation, cfg.RewardCount, _reputation.PerReward));
+        ImGui.TextUnformatted(Loc.Format("StatsTracked", (int)tracked.TotalHours, tracked.Minutes, tracked.Seconds, cfg.StatsSince));
+        if (ImGui.Button($"{Loc.Get("StatsReset")}###statsreset") && ImGui.GetIO().KeyCtrl)
             _reputation.Reset();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("按住 Ctrl 点击以重置");
+            ImGui.SetTooltip(Loc.Get("StatsResetTooltip"));
 
-        if (cfg.Records.Count > 0 && ImGui.TreeNode($"最近记录 ({cfg.Records.Count})###reprecords"))
+        if (cfg.Records.Count > 0 && ImGui.TreeNode($"{Loc.Format("StatsRecords", cfg.Records.Count)}###reprecords"))
         {
             using (var table = ImRaii.Table("reprecords", 2, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.ScrollY, new(0, 150)))
             {
                 if (table)
                 {
-                    ImGui.TableSetupColumn("时间");
-                    ImGui.TableSetupColumn("数量");
+                    ImGui.TableSetupColumn(Loc.Get("ColTime"));
+                    ImGui.TableSetupColumn(Loc.Get("ColAmount"));
                     ImGui.TableHeadersRow();
                     for (int i = cfg.Records.Count - 1; i >= 0; --i)
                     {
@@ -297,34 +321,34 @@ public class MainWindow : Window, IDisposable
 
     private void DrawAutoShop()
     {
-        if (!ImGui.CollapsingHeader("金碟声誉自动购物"))
+        if (!ImGui.CollapsingHeader($"{Loc.Get("ShopHeader")}###autoshop"))
             return;
 
         var cfg = _reputation.Config;
         var cap = ReputationShop.Cap;
-        ImGui.TextUnformatted($"当前金碟声誉: {ReputationShop.GetCurrency():N0} / {cap:N0}");
+        ImGui.TextUnformatted(Loc.Format("ShopCurrent", ReputationShop.GetCurrency(), cap));
 
         var enabled = cfg.AutoShopEnabled;
-        if (ImGui.Checkbox("开启自动购物", ref enabled))
+        if (ImGui.Checkbox($"{Loc.Get("ShopEnable")}###shopenable", ref enabled))
         {
             cfg.AutoShopEnabled = enabled;
             cfg.Save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("开启 Auto register 时，在大厅中金碟声誉达到阈值后，通过 GatherBuddy Reborn 购买下方勾选的物品，再走回节目登记员继续报名\n没有需要购买的物品时跳过，继续报名");
+            ImGui.SetTooltip(Loc.Get("ShopEnableTooltip"));
 
         var stopWhenFull = cfg.StopWhenFull;
-        if (ImGui.Checkbox("刷满后停止自动报名", ref stopWhenFull))
+        if (ImGui.Checkbox($"{Loc.Get("StopWhenFull")}###stopwhenfull", ref stopWhenFull))
         {
             cfg.StopWhenFull = stopWhenFull;
             cfg.Save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("金碟声誉已满，或剩余空间不足一次获得量（按最近记录的最大单次获得量估算）时，在下一次报名前关闭 Auto register");
+            ImGui.SetTooltip(Loc.Get("StopWhenFullTooltip"));
 
         var threshold = cfg.AutoShopThreshold;
         ImGui.SetNextItemWidth(150);
-        if (ImGui.InputInt("触发阈值", ref threshold, 100, 1000))
+        if (ImGui.InputInt($"{Loc.Get("ShopThreshold")}###threshold", ref threshold, 100, 1000))
         {
             cfg.AutoShopThreshold = Math.Clamp(threshold, 0, cap);
             cfg.Save();
@@ -334,26 +358,26 @@ public class MainWindow : Window, IDisposable
         {
             ImGui.TextColored(new Vector4(0, 1, 0, 1), _autoShop.StatusText);
             ImGui.SameLine();
-            if (ImGui.Button("中止"))
+            if (ImGui.Button($"{Loc.Get("ShopAbort")}###shopabort"))
             {
                 // 不再购物时必须停止刷取，否则声誉会溢出
                 _autoShop.Abort();
                 _autoJoin = false;
             }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("中止购物并关闭 Auto register");
+                ImGui.SetTooltip(Loc.Get("ShopAbortTooltip"));
         }
         else if (cfg.AutoShopEnabled)
         {
             var gbrVersion = _ipc.GbrVersion;
             if (gbrVersion == 0)
-                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "需要安装并启用 GatherBuddy Reborn");
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), Loc.Get("WarnGbrMissing"));
             else if (gbrVersion < GatherBuddyIPC.RequiredGbrIpcVersion)
-                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), $"GatherBuddy Reborn 版本过低（IPC {gbrVersion}，需要 {GatherBuddyIPC.RequiredGbrIpcVersion}+）");
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), Loc.Format("WarnGbrOutdated", gbrVersion, GatherBuddyIPC.RequiredGbrIpcVersion));
             else if (!_ipc.GbrListApiRegistered)
-                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "GatherBuddy Reborn 的购买清单接口未注册，请更新 GatherBuddy Reborn");
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), Loc.Get("WarnGbrApiMissing"));
             if (!_ipc.NavReady)
-                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "需要安装并启用 vnavmesh");
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), Loc.Get("WarnNavMissing"));
         }
 
         DrawAutoShopItems(cfg);
@@ -361,15 +385,15 @@ public class MainWindow : Window, IDisposable
 
     private void DrawAutoShopItems(Configuration cfg)
     {
-        ImGui.TextUnformatted("勾选要购买的物品，数量为目标持有数（已学习的物品会自动跳过）:");
+        ImGui.TextUnformatted(Loc.Get("ShopItemsHint"));
         using (var table = ImRaii.Table("autoshopitems", 4, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.ScrollY, new(0, 250)))
         {
             if (table)
             {
-                ImGui.TableSetupColumn("物品", ImGuiTableColumnFlags.WidthStretch);
-                ImGui.TableSetupColumn("花费", ImGuiTableColumnFlags.WidthFixed, 50);
-                ImGui.TableSetupColumn("持有", ImGuiTableColumnFlags.WidthFixed, 50);
-                ImGui.TableSetupColumn("目标数量", ImGuiTableColumnFlags.WidthFixed, 110);
+                ImGui.TableSetupColumn(Loc.Get("ColItem"), ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn(Loc.Get("ColCost"), ImGuiTableColumnFlags.WidthFixed, 50);
+                ImGui.TableSetupColumn(Loc.Get("ColOwned"), ImGuiTableColumnFlags.WidthFixed, 50);
+                ImGui.TableSetupColumn(Loc.Get("ColTarget"), ImGuiTableColumnFlags.WidthFixed, 110);
                 ImGui.TableHeadersRow();
                 var iconSize = new Vector2(ImGui.GetTextLineHeight());
                 foreach (var item in ReputationShop.Items)
@@ -392,7 +416,7 @@ public class MainWindow : Window, IDisposable
                     ImGui.Image(Service.TextureProvider.GetFromGameIcon(new(item.IconId)).GetWrapOrEmpty().Handle, iconSize);
                     ImGui.SameLine();
                     using (ImRaii.PushColor(ImGuiCol.Text, 0xff808080, learned))
-                        ImGui.TextUnformatted(learned ? $"{item.Name}（已学习）" : item.Name);
+                        ImGui.TextUnformatted(learned ? Loc.Format("ItemLearned", item.Name) : item.Name);
 
                     ImGui.TableNextColumn();
                     ImGui.TextUnformatted($"{item.Cost}");

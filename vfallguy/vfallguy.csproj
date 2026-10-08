@@ -6,9 +6,13 @@
 			(upstream 0.0.0.12 -> 0.0.0.12001), so fork builds sort above the
 			matching upstream release and below the next one.
 		-->
-		<Version>0.0.0.12007</Version>
+		<Version>0.0.0.12008</Version>
 		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Include="Localization\*.json" LogicalName="vfallguy.Localization.%(Filename).json" />
+	</ItemGroup>
 
 	<PropertyGroup Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))'">
 		<DalamudLibPath>$(DALAMUD_HOME)/</DalamudLibPath>

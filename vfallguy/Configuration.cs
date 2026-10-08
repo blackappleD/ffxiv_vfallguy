@@ -16,6 +16,9 @@ public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 1;
 
+    // 界面语言，空字符串表示跟随 Dalamud
+    public string Language { get; set; } = "";
+
     // 获得金碟声誉后立即退出副本
     public bool LeaveOnReputation { get; set; } = true;
 
